@@ -1,0 +1,134 @@
+#nsible Playbook for deploying MFA in Linux Machines 
+# Copy PAM file into machines
+---
+- hosts: multi
+  #gather_facts: false
+  tasks:   
+    - name: upgrade all packages
+      yum: name=* state=latest
+    - name: PAM copy directory to the remote server
+      copy:
+       src: /pam_radius-1.4.0.tar.gz
+       dest: /tmp
+    - name: System details
+      debug: msg="{{ item }}"
+      with_items: 
+      - "{{ ansible_distribution }}"
+      - "{{ ansible_distribution_version }}"
+      - "{{ ansible_distribution_major_version }}"
+    - name: install gcc modules
+      package:
+       name: "@Development Tools"
+       state: present
+     #  skip_broken: yes
+      become: yes  
+   # - name: Check if gcc is installed on environment
+    #  shell: rpm -qa | grep 'gcc'
+    #  ignore_errors: yes
+    #  register: result
+   # - name: Exclude gcc from updating to newer version, if gcc is installed
+    #  lineinfile:
+     #  path: /etc/yum.conf
+      ## path: /etc/dnf/dnf.conf
+      # line: exclude=gcc*
+      # insertafter: [main]
+      #when: result.stdout != ""
+#Unarchieve PAM file
+    - name: install pam, pam_devel
+      package:
+       name: pam
+       state: present
+       name: pam-devel
+       state: present 
+    - name: Extract pam_radius-1.4.0.tar.tar into /tmp
+      unarchive:
+        src: /tmp/pam_radius-1.4.0.tar.gz
+        dest: /tmp
+        remote_src: yes
+    - name: compile of configure
+      make:
+        chdir: /tmp/pam_radius-1.4.0
+        target: configure
+      become: yes
+#copying file from one directory to another:
+    - name: copy of file
+      command: cp /tmp/pam_radius-1.4.0/pam_radius_auth.so /lib64/security/pam_radius_auth.so
+#create a directory
+    - name: creates directory
+      file:
+       path: /etc/raddb
+       state: directory
+    - name: create a file with content
+      copy:
+       dest: "/etc/raddb/server"
+       content:
+        172.31.254.248  omnet@123  3
+#taking of backup
+    - name: Taking backup of sshd conf
+      command: cp /etc/ssh/ssh_config /etc/ssh/ssh_config_bck
+#copy of ssh configuration
+    - name: Editing files in sshd_config
+      tags: edit
+      lineinfile:
+       path: /etc/ssh/sshd_config
+       regexp: "{{ item.regexp }}"
+       line: "{{ item.line }}"
+      with_items:
+       - { regexp: '^PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
+       - { regexp: '^PasswordAuthentication', line: 'PasswordAuthentication no' }
+       - { regexp: '^ChallengeResponseAuthentication', line: 'ChallengeResponseAuthentication yes' }
+       - { regexp: '^UsePAM', line: 'UsePAM yes' }
+       - { regexp: '^UsePrivilegeSeparation', line: 'UsePrivilegeSeparation no' }
+    - name: ssh copy of pam
+      command: cp /etc/pam.d/sshd /etc/pam.d/sshd_bck
+    - name: deleting a file
+      file:
+        path: /etc/pam.d/sshd
+        state: absent
+    - name: create a file with content
+      command: touch /etc/pam.d/sshd
+    - name: copying of data  
+      when: ansible_distribution == "CentOS" and ansible_distribution_major_version <= '7'
+      blockinfile:
+       path: /etc/pam.d/sshd
+       block: |
+         #%PAM-1.0
+         auth        requisite    pam_unix.so     not_set_pass 
+         auth        required    pam_radius_auth.so 
+         account     required     pam_unix.so 
+         password    required    pam_unix.so 
+         session     required     pam_unix.so 
+         account     required     pam_access.so 
+         session     required     pam_console.so 
+      become: yes
+    - name: copying of data  
+      when: ansible_distribution == "CentOS" and ansible_distribution_major_version > '7'
+      blockinfile:
+       path: /etc/pam.d/sshd
+       block: |
+         #%PAM-1.0
+         auth         required    pam_radius_auth.so 
+         auth        requisite    pam_unix.so     not_set_pass 
+         account     required     pam_unix.so 
+         password     required    pam_unix.so 
+         session     required     pam_unix.so 
+         account     required     pam_access.so 
+         session     required     pam_console.so 
+      become: yes    
+    - name: restart sshs
+      service: name=sshd state=restarted
+ #we can use this instead
+
+   #   tasks:
+  #- name: "shut down CentOS 6 and Debian 7 systems"
+    #command: /sbin/shutdown -t now
+    #when: (ansible_facts['distribution'] == "CentOS" and ansible_facts['distribution_major_version'] == "6") or
+         # (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "7")
+
+
+
+
+
+
+
+
